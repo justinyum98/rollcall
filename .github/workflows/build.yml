@@ -1,0 +1,70 @@
+name: Build
+
+# Builds RollCall.exe (Windows) and RollCall.app (macOS). PyInstaller can't
+# cross-compile, so each one is built on its own operating system.
+# Push a tag like v0.1.0 to also publish both as a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # only used to publish a release on tags
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Build app
+        run: uv run pyinstaller --noconfirm rollcall.spec
+
+      # The self-test fills in a template and opens the window inside the
+      # *built* app, catching files PyInstaller forgot to bundle.
+      - name: Self-test (macOS)
+        if: runner.os == 'macOS'
+        run: dist/RollCall.app/Contents/MacOS/RollCall --self-test
+
+      - name: Self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        # A windowed .exe returns immediately when run directly, so wait for it.
+        run: |
+          $p = Start-Process -FilePath dist\RollCall.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "Self-test failed with exit code $($p.ExitCode)"; exit 1 }
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        # ditto keeps the bundle's symlinks and permissions intact; plain zip doesn't.
+        run: ditto -c -k --keepParent dist/RollCall.app RollCall-macOS.zip
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\RollCall.exe -DestinationPath RollCall-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RollCall-${{ runner.os }}
+          path: RollCall-*.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RollCall-*.zip

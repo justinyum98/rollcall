@@ -77,7 +77,12 @@ rollcall/
   - Word on macOS: check that `/Applications/Microsoft Word.app` exists.
   - Word on Windows: look for the `Word.Application` registry key with `winreg`.
   - LibreOffice: use `shutil.which("soffice")` plus the standard install paths.
-- `convert_folder(folder, converter)`: Word converts the whole folder in one `docx2pdf.convert(dir, dir)` call, so Word launches only once. LibreOffice runs `soffice --headless --convert-to pdf --outdir`.
+- `convert_to_pdf(files, converter, on_progress, cancel_event)`:
+  - **macOS Word:** one inline JXA script (`osascript -l JavaScript -e`) converts all files, printing one JSON line per file to stderr for progress. Word is quit only if RollCall launched it.
+  - **Windows Word:** `DispatchEx` starts a separate hidden Word, so quitting it can't touch the teacher's documents.
+  - **LibreOffice:** runs `soffice --headless --convert-to pdf` with a throwaway profile, so it works even while LibreOffice is open.
+  - Cancel kills a Word that is stuck behind a dialog.
+  - Word errors are translated into plain language: View Only mode (`-1708`), automation blocked (`-1743`), timeouts (`-1712`).
 - On Windows, the worker thread must call `pythoncom.CoInitialize()` before Word automation, or it fails with "CoInitialize has not been called".
 
 **`starter.py`**: the "Create a starter template" button builds a `.docx` with a short heading, one line per column (`First Name: {{first_name}}`), and brief instructions. This gives a teacher who isn't confident with tech a working template to edit instead of a blank page.
@@ -100,11 +105,11 @@ rollcall/
 - In `rollcall.spec`:
   - Use `--windowed`.
   - Bundle the theme JSON and font files with `collect_data_files("customtkinter")`.
-  - Bundle the `convert.jxa` script used on macOS with `collect_data_files("docx2pdf")`.
-  - Add `copy_metadata("docx2pdf")` because docx2pdf reads its own version at import.
+  - Bundle python-docx's and docxtpl's data files.
+  - Add `NSAppleEventsUsageDescription` so macOS can ask permission to control Word.
 - **Windows:** `--onefile` produces a single `RollCall.exe`, which is easiest for teachers. The CustomTkinter wiki recommends `--onedir`, but `--collect-data` makes onefile work. If the CI self-test fails, fall back to a zipped onedir build.
 - **macOS:** build `RollCall.app` and zip it.
-- **`__main__.py`:** windowed builds have `sys.stdout`/`sys.stderr` set to `None`. Point them at `os.devnull` so docx2pdf's `tqdm` progress output doesn't crash.
+- **`__main__.py`:** windowed builds have `sys.stdout`/`sys.stderr` set to `None`. Point them at `os.devnull` so any library that prints doesn't crash.
 - **`--self-test` flag:** imports everything, loads the theme, merges a built-in sample in a temporary folder, then exits 0 or 1. CI runs this against the built executable.
 - **`build.yml`:** a matrix over `windows-latest` and `macos-latest`. Each job installs uv, runs `uv sync`, runs `pytest`, runs `pyinstaller rollcall.spec`, runs the self-test on the built output, and uploads the artifacts. It triggers on tags and manual dispatch.
 - **Unsigned builds:** the README explains the first-launch warnings ("More info → Run anyway" on Windows; "Open Anyway" in System Settings on macOS) and the macOS one-time "allow RollCall to control Microsoft Word" prompt. Code signing is out of scope.
@@ -124,3 +129,10 @@ rollcall/
 - `uv run python -m rollcall`: manual end-to-end run on this Mac with a sample roster of about 25 students and a template that uses bold/colored placeholders. Check that the documents open in Word with formatting kept, the PDF checkbox produces matching PDFs, and Cancel and Open folder work.
 - `uv run pyinstaller rollcall.spec`, then `dist/RollCall.app/Contents/MacOS/RollCall --self-test` exits 0, and double-clicking the .app launches the window.
 - The Windows `.exe` is verified by the CI self-test. A manual check on a Windows machine is still recommended before handing it to teachers.
+
+## Findings during implementation
+- **docx2pdf was replaced.** It always quits Word, and calls `sys.exit()` on errors, which would silently kill a worker thread.
+- **Word for Mac in "View Only" mode** (an unlicensed account) can open documents but can't save them. `saveAs` fails with "Message not understood". This was confirmed on the development Mac. RollCall explains this and suggests LibreOffice.
+- **Inside the PyInstaller bundle**, touching a missing header makes python-docx load `docx/parts/../templates/…`, which can't be resolved. Template inspection now skips headers and footers that don't exist. The CI `--self-test` caught this.
+- **lxml's `itertext()`** repeats run text on python-docx elements, so paragraph text is read from `w:t` nodes instead.
+- **Old uv Python builds** (3.12.11) couldn't find Tcl from inside a venv. Python 3.12.13 or later works.
