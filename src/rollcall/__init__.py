@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from rollcall!")
+"""RollCall: fill in a Word template once for every student in a spreadsheet."""

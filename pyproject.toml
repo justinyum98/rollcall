@@ -1,7 +1,7 @@
 [project]
 name = "rollcall"
 version = "0.1.0"
-description = "Add your description here"
+description = "Fill in a Word template once for every student in a spreadsheet."
 readme = "README.md"
 authors = [
     { name = "Justin Yum", email = "justinyum98@gmail.com" }
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rollcall = "rollcall:main"
+rollcall = "rollcall.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]

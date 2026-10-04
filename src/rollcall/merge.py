@@ -104,7 +104,7 @@ def inspect_template(path: str | Path, roster: Roster) -> TemplateCheck:
     if not found and not unknown:
         return TemplateCheck(
             error="This template has no placeholders yet. Type a placeholder such as "
-            "{{first_name}} where each student's information should go."
+            "{{First Name}} where each student's information should go."
         )
     return TemplateCheck(
         placeholders=found,
@@ -128,7 +128,7 @@ def _broken_placeholders(document) -> list[str]:
 
 
 def _broken_message(broken: list[str]) -> str:
-    advice = "Each placeholder needs two curly braces on each side, like {{first_name}}."
+    advice = "Each placeholder needs two curly braces on each side, like {{First Name}}."
     if broken:
         return f"This placeholder looks broken: {broken[0].strip()}\n{advice}"
     return f"A placeholder in the template is broken. {advice}"
