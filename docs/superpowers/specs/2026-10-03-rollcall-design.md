@@ -10,7 +10,7 @@ Decisions already made with the user:
 - **Platforms:** Windows `.exe` and macOS `.app`.
 - **GUI toolkit:** CustomTkinter.
 
-Starting state: `/Users/justinyum/dev/rollcall` is empty and is not a git repo. The only system Python is 3.9.6, and its Tk is too old, so we'll use **uv** (already installed) with a uv-managed Python 3.12.
+Starting state: the project directory is empty and is not a git repo. The only system Python is 3.9.6, and its Tk is too old, so we'll use **uv** (already installed) with a uv-managed Python 3.12.
 
 ## Tech stack
 | Need | Library | Why |
