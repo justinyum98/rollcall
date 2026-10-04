@@ -34,7 +34,8 @@ def self_test() -> int:
 
         roster = load_roster(tmp / "students.xlsx")
         template = create_starter_template(roster, tmp / "template.docx")
-        assert inspect_template(template, roster).ok
+        check = inspect_template(template, roster)
+        assert check.ok, check
         result = generate(roster, template, tmp / "out", "{last_name}, {first_name}")
         assert result.errors == [], result.errors
         text = "\n".join(p.text for p in docx.Document(result.created[0]).paragraphs)

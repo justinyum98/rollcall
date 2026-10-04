@@ -215,3 +215,13 @@ def test_generate_escapes_special_characters(tmp_path, make_docx):
     assert result.errors == []
     assert docx_text(result.created[0]) == "Family: Smith & <Jones>"
     assert result.created[0].name == "Smith & Jones.docx"
+
+
+def test_reading_text_does_not_add_headers():
+    # Touching a missing header makes python-docx create one from a file that
+    # isn't reachable inside the packaged app, so inspection must skip them.
+    document = docx.Document()
+    document.add_paragraph("{{ first_name }}")
+    assert merge._paragraph_texts(document) == ["{{ first_name }}"]
+    assert document.sections[0].header.is_linked_to_previous
+    assert document.sections[0].footer.is_linked_to_previous

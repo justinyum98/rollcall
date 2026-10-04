@@ -89,10 +89,11 @@ def inspect_template(path: str | Path, roster: Roster) -> TemplateCheck:
         variables = tpl.get_undeclared_template_variables()
     except jinja2.TemplateSyntaxError:
         return TemplateCheck(error=_broken_message(broken))
-    except Exception:
+    except Exception as e:
         return TemplateCheck(
             error=f'Couldn\'t open "{path.name}" as a Word document. '
-            "Make sure it's a .docx file and isn't open in another program."
+            "Make sure it's a .docx file and isn't open in another program. "
+            f"(Details: {type(e).__name__}: {e})"
         )
     if broken:
         # Not a Jinja error (e.g. "{first_name}}"), but it would show up as
@@ -136,12 +137,21 @@ def _broken_message(broken: list[str]) -> str:
 
 def _paragraph_texts(document) -> list[str]:
     """Text of every paragraph in the body (including tables), headers and footers."""
+    # Skip headers/footers that don't exist: reading one would make python-docx
+    # create it, which also fails inside the packaged app.
     parts = [document.element.body] + [
         hf._element
         for section in document.sections
         for hf in (section.header, section.footer)
+        if not hf.is_linked_to_previous
     ]
-    return ["".join(p.itertext()) for part in parts for p in part.iter(qn("w:p"))]
+    # Join the w:t text nodes directly: lxml's itertext() repeats each run's
+    # text on python-docx's custom element classes.
+    return [
+        "".join(t.text or "" for t in p.iter(qn("w:t")))
+        for part in parts
+        for p in part.iter(qn("w:p"))
+    ]
 
 
 # --- file names -------------------------------------------------------------
