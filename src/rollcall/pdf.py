@@ -18,7 +18,9 @@ from typing import Callable
 
 ProgressCallback = Callable[[int, int, str], None]
 
-_MAC_WORD = [Path("/Applications/Microsoft Word.app"), Path.home() / "Applications/Microsoft Word.app"]
+# Plain strings, not Path: these are macOS paths, and Path would turn them into
+# backslash paths when the tests run on Windows.
+_MAC_WORD = ["/Applications/Microsoft Word.app", os.path.expanduser("~/Applications/Microsoft Word.app")]
 _SOFFICE_CANDIDATES = {
     "darwin": ["/Applications/LibreOffice.app/Contents/MacOS/soffice"],
     "win32": [
@@ -33,7 +35,14 @@ _MAC_WORD_SCRIPT = """
 function run(argv) {
   const word = Application("Microsoft Word");
   const wasRunning = word.running();
+  let cantSave = null;
   for (let i = 0; i < argv.length; i += 2) {
+    if (cantSave) {
+      // Word can't save at all (e.g. "View Only"), so don't open every file
+      // just to fail again; report the rest with the same error.
+      console.log(JSON.stringify({ input: argv[i], ok: false, error: cantSave }));
+      continue;
+    }
     let doc = null;
     try {
       word.open(Path(argv[i]));
@@ -41,6 +50,7 @@ function run(argv) {
       doc.saveAs({ fileName: argv[i + 1], fileFormat: "format PDF" });
       console.log(JSON.stringify({ input: argv[i], ok: true }));
     } catch (e) {
+      if (e.toString().includes("Message not understood")) cantSave = e.toString();
       console.log(JSON.stringify({ input: argv[i], ok: false, error: e.toString() }));
     }
     try { if (doc) doc.close({ saving: "no" }); } catch (e) {}
@@ -63,17 +73,24 @@ class PdfResult:
     errors: list[tuple[str, str]] = field(default_factory=list)  # (file name, message)
 
 
-def find_converter(platform: str = sys.platform, exists=os.path.exists, which=shutil.which, word_registered=None) -> Converter | None:
-    if platform == "darwin" and any(exists(str(p)) for p in _MAC_WORD):
-        return Converter("word", "Microsoft Word")
+def find_converters(platform: str = sys.platform, exists=os.path.exists, which=shutil.which, word_registered=None) -> list[Converter]:
+    """Every installed way to make PDFs, best first (Word's PDFs match the .docx exactly)."""
+    converters = []
+    if platform == "darwin" and any(exists(p) for p in _MAC_WORD):
+        converters.append(Converter("word", "Microsoft Word"))
     if platform == "win32" and (word_registered or _word_in_registry)():
-        return Converter("word", "Microsoft Word")
+        converters.append(Converter("word", "Microsoft Word"))
 
     soffice = which("soffice") or which("libreoffice")
     soffice = soffice or next((p for p in _SOFFICE_CANDIDATES.get(platform, []) if exists(p)), None)
     if soffice:
-        return Converter("libreoffice", "LibreOffice", soffice)
-    return None
+        converters.append(Converter("libreoffice", "LibreOffice", soffice))
+    return converters
+
+
+def find_converter(*args, **kwargs) -> Converter | None:
+    converters = find_converters(*args, **kwargs)
+    return converters[0] if converters else None
 
 
 def _word_in_registry() -> bool:
@@ -96,10 +113,32 @@ def convert_to_pdf(
     if not files:
         return PdfResult()
     if converter.kind == "libreoffice":
-        return _convert_libreoffice(files, converter.path, on_progress)
+        return _convert_libreoffice(files, converter.path, on_progress, cancel_event)
     if sys.platform == "darwin":
         return _convert_word_mac(files, on_progress, cancel_event)
     return _convert_word_windows(files, on_progress, cancel_event)
+
+
+def convert_with_fallback(
+    files: list[Path],
+    converters: list[Converter],
+    on_progress: ProgressCallback | None = None,
+    cancel_event: threading.Event | None = None,
+) -> tuple[PdfResult, Converter]:
+    """Try each converter until one makes PDFs.
+
+    Word can be installed but unable to save (e.g. "View Only" when the
+    Office account isn't licensed), so if it makes nothing, try LibreOffice.
+    Returns the result and the converter that produced it.
+    """
+    first = None
+    for converter in converters:
+        result = convert_to_pdf(files, converter, on_progress, cancel_event)
+        if result.created or not result.errors or (cancel_event is not None and cancel_event.is_set()):
+            return result, converter
+        first = first or (result, converter)
+    # Nothing worked; the first converter's error is the most useful to show.
+    return first
 
 
 def _convert_word_mac(files, on_progress, cancel_event, command=None) -> PdfResult:
@@ -197,8 +236,9 @@ def _convert_word_windows(files, on_progress, cancel_event) -> PdfResult:
     return result
 
 
-def _convert_libreoffice(files, soffice, on_progress) -> PdfResult:
-    result = PdfResult()
+def _convert_libreoffice(files, soffice, on_progress, cancel_event) -> PdfResult:
+    command = [soffice] if isinstance(soffice, str) else list(soffice)
+    result, done, errors = PdfResult(), 0, []
     # A private profile lets this work even if the teacher has LibreOffice
     # open; otherwise the headless run silently does nothing.
     with tempfile.TemporaryDirectory() as profile:
@@ -206,17 +246,35 @@ def _convert_libreoffice(files, soffice, on_progress) -> PdfResult:
         for f in files:
             by_folder.setdefault(f.parent, []).append(f)
         for folder, group in by_folder.items():
-            proc = subprocess.run(
-                [soffice, f"-env:UserInstallation={Path(profile).as_uri()}", "--headless",
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            proc = subprocess.Popen(
+                [*command, f"-env:UserInstallation={Path(profile).as_uri()}", "--headless",
                  "--convert-to", "pdf", "--outdir", str(folder), *map(str, group)],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 **_no_console_window(),
             )
-            for f in group:
-                ok = f.with_suffix(".pdf").exists()
-                _record(result, f, ok, None if ok else (proc.stderr.strip() or "LibreOffice didn't create the PDF"))
-    if on_progress:
+            if cancel_event is not None:
+                threading.Thread(target=_terminate_on_cancel, args=(proc, cancel_event), daemon=True).start()
+            # soffice prints "convert <input> -> <output> ..." as each file finishes.
+            for line in proc.stdout:
+                if line.startswith("convert "):
+                    done += 1
+                    if on_progress:
+                        on_progress(done, len(files), Path(line[8:].split(" -> ")[0]).stem)
+                elif line.startswith("Error"):
+                    errors.append(line.strip())
+            proc.wait()
+
+    cancelled = cancel_event is not None and cancel_event.is_set()
+    for f in files:
+        if f.with_suffix(".pdf").exists():
+            _record(result, f, True)
+        elif not cancelled:
+            _record(result, f, False, errors[0] if errors else "LibreOffice didn't create the PDF")
+    if on_progress and not cancelled:
         on_progress(len(files), len(files), "")
     return result
 

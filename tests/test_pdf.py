@@ -122,3 +122,113 @@ def test_mac_driver_failure_before_any_file(tmp_path):
     result = pdf._convert_word_mac(files, None, None, command)
     assert result.errors[0][0] == "All files"
     assert "Automation" in result.errors[0][1]
+
+
+# --- choosing and falling back between converters ---------------------------
+
+WORD = pdf.Converter("word", "Microsoft Word")
+LIBRE = pdf.Converter("libreoffice", "LibreOffice", "/bin/soffice")
+
+
+def test_find_converters_lists_word_then_libreoffice():
+    soffice = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+    exists = lambda p: p in ("/Applications/Microsoft Word.app", soffice)
+    convs = pdf.find_converters("darwin", exists=exists, which=no_which)
+    assert [c.kind for c in convs] == ["word", "libreoffice"]
+    assert find_converter("darwin", exists=exists, which=no_which).kind == "word"
+
+
+def fake_converters(monkeypatch, outcomes):
+    """Make convert_to_pdf return a canned result per converter kind."""
+    calls = []
+
+    def fake(files, converter, on_progress=None, cancel_event=None):
+        calls.append(converter.kind)
+        return outcomes[converter.kind](files)
+
+    monkeypatch.setattr(pdf, "convert_to_pdf", fake)
+    return calls
+
+
+def all_fail(files):
+    return pdf.PdfResult(errors=[(f.name, "Word is View Only") for f in files])
+
+
+def all_ok(files):
+    return pdf.PdfResult(created=[f.with_suffix(".pdf") for f in files])
+
+
+def test_falls_back_when_word_makes_nothing(tmp_path, monkeypatch):
+    calls = fake_converters(monkeypatch, {"word": all_fail, "libreoffice": all_ok})
+    result, used = pdf.convert_with_fallback(docx_files(tmp_path, "Ada", "Alan"), [WORD, LIBRE])
+    assert calls == ["word", "libreoffice"]
+    assert used == LIBRE
+    assert len(result.created) == 2 and result.errors == []
+
+
+def test_no_fallback_after_partial_success(tmp_path, monkeypatch):
+    def some_ok(files):
+        return pdf.PdfResult(created=[files[0].with_suffix(".pdf")], errors=[(files[1].name, "oops")])
+
+    calls = fake_converters(monkeypatch, {"word": some_ok, "libreoffice": all_ok})
+    result, used = pdf.convert_with_fallback(docx_files(tmp_path, "Ada", "Alan"), [WORD, LIBRE])
+    assert calls == ["word"] and used == WORD
+
+
+def test_no_fallback_after_cancel(tmp_path, monkeypatch):
+    calls = fake_converters(monkeypatch, {"word": lambda files: pdf.PdfResult(), "libreoffice": all_ok})
+    cancel = threading.Event()
+    cancel.set()
+    pdf.convert_with_fallback(docx_files(tmp_path, "Ada"), [WORD, LIBRE], cancel_event=cancel)
+    assert calls == ["word"]
+
+
+def test_all_converters_fail_reports_the_first_error(tmp_path, monkeypatch):
+    fake_converters(monkeypatch, {"word": all_fail, "libreoffice": lambda files: pdf.PdfResult(errors=[("x", "libre broke")])})
+    result, used = pdf.convert_with_fallback(docx_files(tmp_path, "Ada"), [WORD, LIBRE])
+    assert used == WORD
+    assert result.errors == [("Ada.docx", "Word is View Only")]
+
+
+# --- LibreOffice driver, with soffice replaced by a fake script --------------
+
+FAKE_SOFFICE = r"""
+import sys, time
+from pathlib import Path
+args = sys.argv[1:]
+outdir = Path(args[args.index("--outdir") + 1])
+print("Fontconfig warning: noise", flush=True)
+for f in [a for a in args if a.endswith(".docx")]:
+    time.sleep(float(%r))
+    if "Bad" in f:
+        print(f"Error: source file could not be loaded", flush=True)
+        continue
+    pdf = outdir / (Path(f).stem + ".pdf")
+    pdf.write_bytes(b"%%PDF-fake")
+    print(f"convert {f} -> {pdf} using filter : writer_pdf_Export", flush=True)
+"""
+
+
+def fake_soffice(tmp_path, delay=0.0):
+    script = tmp_path / "fake_soffice.py"
+    script.write_text(FAKE_SOFFICE % delay)
+    return [sys.executable, str(script)]
+
+
+def test_libreoffice_reports_progress_per_file(tmp_path):
+    files = docx_files(tmp_path, "Ada", "Bad", "Alan")
+    progress = []
+    result = pdf._convert_libreoffice(files, fake_soffice(tmp_path), lambda d, t, n: progress.append((d, n)), None)
+    assert sorted(p.name for p in result.created) == ["Ada.pdf", "Alan.pdf"]
+    assert [who for who, _ in result.errors] == ["Bad.docx"]
+    assert progress == [(1, "Ada"), (2, "Alan"), (3, "")]
+
+
+def test_libreoffice_cancel(tmp_path):
+    files = docx_files(tmp_path, "Ada", "Alan")
+    cancel = threading.Event()
+    threading.Timer(0.3, cancel.set).start()
+    start = time.monotonic()
+    result = pdf._convert_libreoffice(files, fake_soffice(tmp_path, delay=30), None, cancel)
+    assert time.monotonic() - start < 5
+    assert result.created == []

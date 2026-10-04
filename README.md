@@ -30,9 +30,9 @@ Certificates, progress letters, permission slips, name tags: write it once in Wo
 RollCall remembers your spreadsheet, template, and folder for next time. If you change the spreadsheet or template, just click **Create documents** again; RollCall rereads both every time.
 
 ### Saving as PDF
-PDFs are made with **Microsoft Word** if it's installed; if not, RollCall uses **LibreOffice** (free, from libreoffice.org). If neither is installed, the PDF option is greyed out.
+PDFs are made with **Microsoft Word** if it's installed, or **LibreOffice** (free, from libreoffice.org) if not. If Word is installed but can't make PDFs, RollCall switches to LibreOffice automatically when it's installed. If neither is installed, the PDF option is greyed out.
 - **Mac:** the first time, macOS asks whether RollCall may control Microsoft Word. Click **OK**.
-- If Word says **"View Only"** (your Office account can't edit on this computer), Word can't make PDFs. Sign in with an account that can edit, or install LibreOffice.
+- If Word says **"View Only"** (your Office account can't edit on this computer), Word can't make PDFs. Install LibreOffice and RollCall will use it instead, or sign in to Word with an account that can edit.
 - RollCall never closes a copy of Word you already had open.
 
 ### Opening RollCall for the first time
@@ -65,7 +65,7 @@ uv run python scripts/make_examples.py   # regenerate examples/
 |---|---|
 | `roster.py` | Reads `.xlsx`/`.csv` into rows. Column headers become placeholder keys (`"First Name"` → `first_name`). Values become display text (`5.0` → `5`, dates → `June 12, 2026`). |
 | `merge.py` | Checks templates (unknown or broken placeholders) and renders one `.docx` per student into a new timestamped folder. Lets teachers write `{{First Name}}` by rewriting it to `{{ first_name }}` in docxtpl's `patch_xml`, after Word's split runs are merged. |
-| `pdf.py` | Converts to PDF with Word (JXA on macOS, COM on Windows) or headless LibreOffice. Only quits Word if RollCall started it. |
+| `pdf.py` | Converts to PDF with Word (JXA on macOS, COM on Windows) or headless LibreOffice, falling back to the next converter if one makes nothing. Only quits Word if RollCall started it. |
 | `starter.py` | Builds a starter template from the spreadsheet's columns. |
 | `gui.py` | The window. Work runs on a background thread and reports back through a queue, because Tk isn't thread-safe. |
 | `__main__.py` | Entry point. `--self-test` exercises the packaged app in CI. |

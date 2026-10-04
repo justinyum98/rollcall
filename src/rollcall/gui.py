@@ -56,7 +56,7 @@ class RollCallApp(ctk.CTk):
         self.template_path: Path | None = None
         self.check: merge.TemplateCheck | None = None
         self.out_dir = Path(self.settings.get("out_dir") or Path.home() / "Documents")
-        self.converter = pdf.find_converter()
+        self.converters = pdf.find_converters()  # best first; later ones are fallbacks
         self.messages: queue.Queue = queue.Queue()
         self.cancel_event = threading.Event()
         # Only the main thread changes this, so it can't race with the worker.
@@ -149,11 +149,14 @@ class RollCallApp(ctk.CTk):
         self.pattern_example.grid(row=1, column=1, sticky="w", padx=(8, 0))
         self.pattern.trace_add("write", lambda *_: self._update_pattern_example())
 
-        self.want_pdf = ctk.BooleanVar(value=bool(self.settings.get("pdf")) and self.converter is not None)
+        self.want_pdf = ctk.BooleanVar(value=bool(self.settings.get("pdf")) and bool(self.converters))
         self.pdf_checkbox = ctk.CTkCheckBox(step, text="Also save each one as a PDF", variable=self.want_pdf)
         self.pdf_checkbox.grid(row=3, column=0, sticky="w", padx=PAD, pady=(10, 0))
-        if self.converter:
-            hint = f"PDFs are made with {self.converter.label}."
+        if self.converters:
+            hint = f"PDFs are made with {self.converters[0].label}"
+            if len(self.converters) > 1:
+                hint += f" (or {self.converters[1].label}, if {self.converters[0].label} can't)"
+            hint += "."
         else:
             self.pdf_checkbox.configure(state="disabled")
             hint = "To make PDFs, install Microsoft Word or LibreOffice (free), then reopen RollCall."
@@ -360,12 +363,12 @@ class RollCallApp(ctk.CTk):
         threading.Thread(
             target=self._work,
             args=(self.roster, self.template_path, self.out_dir, self.pattern.get(),
-                  self.converter if self.want_pdf.get() else None),
+                  self.converters if self.want_pdf.get() else []),
             daemon=True,
         ).start()
         self.after(100, self._poll)
 
-    def _work(self, roster, template_path, out_dir, pattern, converter):
+    def _work(self, roster, template_path, out_dir, pattern, converters):
         """Runs on a background thread. Talks to the window only through self.messages."""
         try:
             merged = merge.generate(
@@ -373,15 +376,15 @@ class RollCallApp(ctk.CTk):
                 on_progress=lambda d, t, n: self.messages.put(("progress", "Creating", d, t, n)),
                 cancel_event=self.cancel_event,
             )
-            pdfs = None
-            if converter and merged.created and not merged.cancelled:
+            pdfs, used = None, None
+            if converters and merged.created and not merged.cancelled:
                 self.messages.put(("progress", "Saving PDFs of", 0, len(merged.created), ""))
-                pdfs = pdf.convert_to_pdf(
-                    merged.created, converter,
+                pdfs, used = pdf.convert_with_fallback(
+                    merged.created, converters,
                     on_progress=lambda d, t, n: self.messages.put(("progress", "Saving PDFs of", d, t, n)),
                     cancel_event=self.cancel_event,
                 )
-            self.messages.put(("done", merged, pdfs))
+            self.messages.put(("done", merged, pdfs, used))
         except Exception as e:
             self.messages.put(("failed", str(e)))
 
@@ -405,7 +408,7 @@ class RollCallApp(ctk.CTk):
             pass
         self.after(100, self._poll)
 
-    def _finish(self, merged: merge.MergeResult, pdfs: pdf.PdfResult | None):
+    def _finish(self, merged: merge.MergeResult, pdfs: pdf.PdfResult | None, used: pdf.Converter | None = None):
         self._set_running(False)
         self.result_folder = merged.folder
         created = len(merged.created)
@@ -415,6 +418,8 @@ class RollCallApp(ctk.CTk):
         message += f' in the folder "{merged.folder.name}".'
         if merged.cancelled or self.cancel_event.is_set():
             message = "Stopped. " + message
+        if pdfs and pdfs.created and used and used != self.converters[0]:
+            message += f" The PDFs were made with {used.label}, because {self.converters[0].label} couldn't save them."
 
         problems = [f"{who}: {why}" for who, why in merged.errors]
         if pdfs:
