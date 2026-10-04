@@ -67,7 +67,10 @@ def load_roster(path: str | Path) -> Roster:
     if not rows:
         raise RosterError(f'"{path.name}" looks empty. Put column names in the first row.')
 
-    columns = _make_columns(rows[0])
+    # Excel often reports extra blank columns on the right; keep only up to the
+    # last column that has a header or any student data.
+    width = max(i + 1 for r in rows for i, v in enumerate(r) if v)
+    columns = _make_columns(rows[0][:width] + [""] * (width - len(rows[0])))
     students = [
         {col.key: (r[i] if i < len(r) else "") for i, col in enumerate(columns)}
         for r in rows[1:]
@@ -80,9 +83,6 @@ def load_roster(path: str | Path) -> Roster:
 
 
 def _make_columns(headers: list[str]) -> list[Column]:
-    # Trim trailing empty headers (Excel often reports extra blank columns).
-    while headers and not headers[-1]:
-        headers = headers[:-1]
     columns, seen = [], set()
     for i, label in enumerate(headers, start=1):
         base = make_key(label) or f"column_{i}"

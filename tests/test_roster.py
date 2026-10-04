@@ -115,3 +115,10 @@ def test_display_name(make_xlsx):
 
     roster = load_roster(make_xlsx([["Student", "Grade"], ["Ada L.", "5"]]))
     assert roster.display_name(roster.rows[0]) == "Ada L."
+
+
+def test_trailing_blank_columns(make_xlsx):
+    path = make_xlsx([["First", None, None, None], ["Ada", None, "note", None]])
+    roster = load_roster(path)
+    assert [c.label for c in roster.columns] == ["First", "Column 2", "Column 3"]
+    assert roster.rows[0] == {"first": "Ada", "column_2": "", "column_3": "note"}
