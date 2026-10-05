@@ -33,6 +33,41 @@ def make_roster():
     wb.save(EXAMPLES / "Class list.xlsx")
 
 
+# (behavior, vision, special needs, tolerant, not next to) for the seating example.
+SEATING = {
+    "Ada": ("loud", "", "", "", "Alan Turing"),
+    "Alan": ("loud", "", "", "", ""),
+    "Grace": ("quiet", "", "", "yes", ""),
+    "José": ("", "x", "", "", ""),
+    "Mei": ("quiet", "", "", "yes", ""),
+    "Priya": ("", "x", "", "yes", ""),
+    "Liam": ("LOUD", "", "Yes", "", ""),
+    "Zoë": ("quiet", "", "", "yes", ""),
+    "Kwame": ("", "", "", "yes", "Omar Haddad"),
+    "Sofia": ("loud", "", "", "", ""),
+    "Noah": ("", "x", "", "", ""),
+    "Aiyana": ("quiet", "", "", "yes", ""),
+    "Omar": ("", "", "", "", ""),
+    "Hana": ("quiet", "", "", "yes", ""),
+    "Lucas": ("loud", "", "", "", "Sofia García"),
+    "Emma": ("", "", "yes", "", ""),
+    "Diego": ("", "", "", "yes", ""),
+    "Fatima": ("quiet", "", "", "", ""),
+}
+
+
+def make_seating_example():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Seating"
+    ws.append(["First Name", "Last Name", "Behavior", "Vision", "Special Needs", "Tolerant", "Not Next To"])
+    for first, last, _ in STUDENTS[:24]:
+        ws.append([first, last, *SEATING.get(first, ("", "", "", "", ""))])
+    for col, width in zip("ABCDEFG", (12, 14, 10, 8, 14, 10, 18)):
+        ws.column_dimensions[col].width = width
+    wb.save(EXAMPLES / "Seating example.xlsx")
+
+
 def make_certificate():
     document = docx.Document()
     document.sections[0].header.paragraphs[0].text = "Room 12 · {{Teacher}}"
@@ -68,4 +103,5 @@ if __name__ == "__main__":
     EXAMPLES.mkdir(exist_ok=True)
     make_roster()
     make_certificate()
+    make_seating_example()
     print(f"Wrote examples to {EXAMPLES}")

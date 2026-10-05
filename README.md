@@ -1,8 +1,9 @@
 # RollCall
 
-**Make a filled-in document for every student on your list, in a few clicks.**
+**Make a filled-in document for every student on your list, and a seating chart that follows your rules, in a few clicks.**
 
-Certificates, progress letters, permission slips, name tags: write it once in Word, and RollCall makes a copy for each student with their name (and anything else from your spreadsheet) filled in. It can also save each copy as a PDF.
+- **Documents:** certificates, progress letters, permission slips, name tags. Write it once in Word, and RollCall makes a copy for each student with their name (and anything else from your spreadsheet) filled in. It can also save each copy as a PDF.
+- **Seating chart:** tell RollCall who's loud, who needs to see the board, and who shouldn't sit together, and it suggests a chart you can adjust and print.
 
 ---
 
@@ -42,8 +43,33 @@ RollCall isn't signed by Apple or Microsoft, so your computer warns you the firs
 
 If your school manages your computer, you may need to ask IT to allow it.
 
+### Seating charts
+Open the **Seating chart** tab.
+
+1. **Add your students.** Click **Import from spreadsheet…**, or type names in and click **Add student**. Each class (Period 1, Period 2, …) is saved separately; use **New class** to add another.
+2. **Mark each student** by clicking the cells in the list:
+   - **Behavior**: click to cycle *loud → normal → quiet*.
+   - **Needs front**: can't see the board from far away.
+   - **Special needs**: serious behavior needs; only "tolerant" students are seated next to them.
+   - **Tolerant**: fine sitting next to special-needs students.
+
+   Your spreadsheet can also include these as columns (**Behavior**, **Vision**, **Special Needs**, **Tolerant**, and **Not Next To** with names separated by commas). RollCall reads them when you import.
+3. **Keep apart:** choose two students and click **Add** for each pair who shouldn't sit together.
+4. **Set up the room:** *Rows* of single desks, *Pairs* of desks, or *Tables*, and how many.
+5. Click **Make seating chart**. RollCall follows these rules:
+   - Students who need to see the board sit in the front rows.
+   - "Keep apart" pairs and two loud students are never seated next to each other.
+   - Special-needs students sit only next to tolerant students, toward the back of the room.
+   - Loud students are seated next to quiet ones when possible.
+
+   ("Next to" means beside, in front, or behind; everyone at a table counts as next to each other.) If some rules can't all be met, RollCall makes the best chart it can and lists what it couldn't do.
+6. **Adjust it:** click two seats to swap them. Right-click a seat (or select it and click **Pin seat**) to keep that student there, then click **Shuffle** to rearrange everyone else.
+7. Click **Save as Word…** (and tick **Also PDF**) to print it.
+
+**Privacy:** classifications like *special needs* stay on your computer, and never appear on the printed chart, which shows names only.
+
 ### Try it out
-The `examples` folder has a class list of 25 students and a certificate template. Use them to see how RollCall works before using your own files.
+The `examples` folder has a class list of 25 students and a certificate template for the Documents tab, plus `Seating example.xlsx` (24 students with behavior, vision, and "not next to" columns) for the Seating chart tab.
 
 ---
 
@@ -67,7 +93,12 @@ uv run python scripts/make_examples.py   # regenerate examples/
 | `merge.py` | Checks templates (unknown or broken placeholders) and renders one `.docx` per student into a new timestamped folder. Lets teachers write `{{First Name}}` by rewriting it to `{{ first_name }}` in docxtpl's `patch_xml`, after Word's split runs are merged. |
 | `pdf.py` | Converts to PDF with Word (JXA on macOS, COM on Windows) or headless LibreOffice, falling back to the next converter if one makes nothing. Only quits Word if RollCall started it. |
 | `starter.py` | Builds a starter template from the spreadsheet's columns. |
-| `gui.py` | The window. Work runs on a background thread and reports back through a queue, because Tk isn't thread-safe. |
+| `gui.py` | The tabbed window and the Documents tab. Work runs on a background thread and reports back through a queue, because Tk isn't thread-safe. |
+| `seating/model.py` | Students, room layouts (rows, pairs, tables) and who counts as "next to" whom, saved classes (JSON in the app's settings folder). |
+| `seating/importing.py` | Reads students and classification columns from a spreadsheet, merging into an existing class. |
+| `seating/solver.py` | Scores a chart with a penalty per rule ("never" rules weigh 200–1000, preferences 5–20) and searches for the best one by simulated annealing over seat swaps. `find_problems()` explains broken rules in plain language. |
+| `seating/export.py` | The printable chart (names only) as a landscape Word document. |
+| `seating_gui.py` | The Seating chart tab. The student list is a `ttk.Treeview`, because 40 rows of CustomTkinter widgets take about 5 s to build. |
 | `__main__.py` | Entry point. `--self-test` exercises the packaged app in CI. |
 
 **Releases:** `.github/workflows/build.yml` builds and self-tests the Windows `.exe` and the macOS `.app` on every push. Push a `v*` tag to publish both as a GitHub release. The macOS build runs on Apple Silicon runners, so it targets Apple Silicon Macs.

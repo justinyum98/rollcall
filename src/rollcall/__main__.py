@@ -23,6 +23,9 @@ def self_test() -> int:
     from rollcall.gui import RollCallApp
     from rollcall.merge import generate, inspect_template
     from rollcall.roster import load_roster
+    from rollcall.seating.export import save_chart_docx
+    from rollcall.seating.model import Layout, SeatingClass, Student
+    from rollcall.seating.solver import arrange
     from rollcall.starter import create_starter_template
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -40,6 +43,17 @@ def self_test() -> int:
         assert result.errors == [], result.errors
         text = "\n".join(p.text for p in docx.Document(result.created[0]).paragraphs)
         assert "First Name: José" in text, text
+
+        # Seating: arrange a class with a rule, then export the printable chart.
+        cls = SeatingClass(name="Self-test", layout=Layout("pairs", rows=2, cols=2))
+        cls.students = [Student("Ada", "L", behavior="loud"), Student("Alan", "T", behavior="loud"),
+                        Student("Grace", "H", behavior="quiet"), Student("Mei", "C")]
+        cls.keep_apart = [(cls.students[0].id, cls.students[1].id)]
+        arrangement = arrange(cls, seed=1)
+        assert arrangement.problems == [], arrangement.problems
+        cls.chart = arrangement.chart
+        chart = save_chart_docx(cls, tmp / "chart.docx")
+        assert "Ada L" in "".join(c.text for t in docx.Document(chart).tables for r in t.rows for c in r.cells)
 
     # Build the window once, so missing theme or font files fail here too.
     app = RollCallApp()

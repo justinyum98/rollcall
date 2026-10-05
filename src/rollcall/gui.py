@@ -10,6 +10,7 @@ import customtkinter as ctk
 
 from . import merge, pdf, starter
 from .roster import Roster, RosterError, load_roster
+from .seating_gui import SeatingTab
 from .settings import load_settings, save_settings
 from .widgets import GREEN, MUTED, ORANGE, PAD, RED, TEXT, Step, open_path
 
@@ -476,7 +477,7 @@ class DocumentsTab(ctk.CTkFrame):
 
 
 class RollCallApp(ctk.CTk):
-    TABS = ("Documents",)
+    TABS = ("Documents", "Seating chart")
 
     def __init__(self):
         super().__init__()
@@ -496,6 +497,8 @@ class RollCallApp(ctk.CTk):
             self.tabs.tab(name).grid_rowconfigure(0, weight=1)
         self.documents = DocumentsTab(self.tabs.tab("Documents"), self.settings, converters)
         self.documents.grid(row=0, column=0, sticky="nsew")
+        self.seating = SeatingTab(self.tabs.tab("Seating chart"), self.settings, converters)
+        self.seating.grid(row=0, column=0, sticky="nsew")
         if self.settings.get("tab") in self.TABS:
             self.tabs.set(self.settings["tab"])
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -505,6 +508,7 @@ class RollCallApp(ctk.CTk):
 
     def _on_close(self):
         self.documents.on_close()
+        self.seating.on_close()
         save_settings(self.settings)
         self.destroy()
 
