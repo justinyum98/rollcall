@@ -1,9 +1,6 @@
-"""The RollCall window: three numbered steps and a big "Create documents" button."""
+"""The RollCall window: a Documents tab and a Seating chart tab."""
 
-import os
 import queue
-import subprocess
-import sys
 import threading
 from collections import Counter
 from pathlib import Path
@@ -14,49 +11,21 @@ import customtkinter as ctk
 from . import merge, pdf, starter
 from .roster import Roster, RosterError, load_roster
 from .settings import load_settings, save_settings
-
-GREEN = ("#1a7f37", "#4ac26b")
-ORANGE = ("#9a6700", "#d29922")
-RED = ("#cf222e", "#ff7b72")
-MUTED = ("gray40", "gray65")
-PAD = 16
+from .widgets import GREEN, MUTED, ORANGE, PAD, RED, TEXT, Step, open_path
 
 
-def open_path(path: Path) -> None:
-    """Open a file or folder the way double-clicking it would."""
-    if sys.platform == "win32":
-        os.startfile(path)
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
+class DocumentsTab(ctk.CTkFrame):
+    """Three numbered steps and a big "Create documents" button."""
 
-
-class Step(ctk.CTkFrame):
-    """A rounded card with a numbered heading."""
-
-    def __init__(self, master, number: int, title: str):
-        super().__init__(master)
-        self.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            self, text=f"{number}   {title}", font=ctk.CTkFont(size=16, weight="bold"), anchor="w"
-        ).grid(row=0, column=0, sticky="w", padx=PAD, pady=(12, 4))
-
-
-class RollCallApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.title("RollCall")
-        self.geometry("760x820")
-        self.minsize(640, 640)
-
-        self.settings = load_settings()
+    def __init__(self, master, settings: dict, converters: list[pdf.Converter]):
+        super().__init__(master, fg_color="transparent")
+        self.settings = settings  # shared with the other tab; saved by the window
         self.roster: Roster | None = None
         self.roster_path: Path | None = None
         self.template_path: Path | None = None
         self.check: merge.TemplateCheck | None = None
         self.out_dir = Path(self.settings.get("out_dir") or Path.home() / "Documents")
-        self.converters = pdf.find_converters()  # best first; later ones are fallbacks
+        self.converters = converters  # best first; later ones are fallbacks
         self.messages: queue.Queue = queue.Queue()
         self.cancel_event = threading.Event()
         # Only the main thread changes this, so it can't race with the worker.
@@ -66,7 +35,6 @@ class RollCallApp(ctk.CTk):
         self._build()
         self._restore_last_session()
         self._refresh()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # --- layout -------------------------------------------------------------
 
@@ -121,7 +89,7 @@ class RollCallApp(ctk.CTk):
         ctk.CTkButton(row, text="Choose template…", command=self._choose_template).pack(side="left")
         self.starter_button = ctk.CTkButton(
             row, text="Create a starter template", fg_color="transparent", border_width=1,
-            text_color=("gray10", "gray90"), command=self._create_starter,
+            text_color=TEXT, command=self._create_starter,
         )
         self.starter_button.pack(side="left", padx=12)
 
@@ -234,7 +202,7 @@ class RollCallApp(ctk.CTk):
             text = starter.placeholder_for(column)
             ctk.CTkButton(
                 self.placeholder_box, text=text, height=26, fg_color=("gray85", "gray25"),
-                text_color=("gray10", "gray90"), hover_color=("gray75", "gray35"),
+                text_color=TEXT, hover_color=("gray75", "gray35"),
                 command=lambda t=text: self._copy(t),
             ).grid(row=i // per_row, column=i % per_row, sticky="w", padx=(0, 8), pady=3)
 
@@ -487,7 +455,7 @@ class RollCallApp(ctk.CTk):
         self.create_button.configure(state="normal" if ready else "disabled")
 
     def _set_status(self, text: str, color=None):
-        self.status.configure(text=text, text_color=color or ("gray10", "gray90"))
+        self.status.configure(text=text, text_color=color or TEXT)
 
     def _initial_dir(self, key: str) -> str:
         last = self.settings.get(key)
@@ -503,8 +471,40 @@ class RollCallApp(ctk.CTk):
             self.template_file_label.configure(text=self.template_path.name)
             self._check_template()
 
-    def _on_close(self):
+    def on_close(self):
         self.cancel_event.set()
+
+
+class RollCallApp(ctk.CTk):
+    TABS = ("Documents",)
+
+    def __init__(self):
+        super().__init__()
+        self.title("RollCall")
+        self.geometry("1100x820")
+        self.minsize(760, 640)
+        self.settings = load_settings()
+        converters = pdf.find_converters()
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.tabs = ctk.CTkTabview(self, command=self._remember_tab)
+        self.tabs.grid(row=0, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        for name in self.TABS:
+            self.tabs.add(name)
+            self.tabs.tab(name).grid_columnconfigure(0, weight=1)
+            self.tabs.tab(name).grid_rowconfigure(0, weight=1)
+        self.documents = DocumentsTab(self.tabs.tab("Documents"), self.settings, converters)
+        self.documents.grid(row=0, column=0, sticky="nsew")
+        if self.settings.get("tab") in self.TABS:
+            self.tabs.set(self.settings["tab"])
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _remember_tab(self):
+        self.settings["tab"] = self.tabs.get()
+
+    def _on_close(self):
+        self.documents.on_close()
         save_settings(self.settings)
         self.destroy()
 
