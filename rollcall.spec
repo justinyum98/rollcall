@@ -34,7 +34,7 @@ if sys.platform == "darwin":
         name="RollCall.app",
         bundle_identifier="org.rollcall.app",
         info_plist={
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": "0.2.0",
             "NSHighResolutionCapable": True,
             # Shown when macOS asks the teacher to let RollCall control Word (for PDFs).
             "NSAppleEventsUsageDescription": "RollCall uses Microsoft Word to save your documents as PDFs.",

@@ -1,6 +1,6 @@
 [project]
 name = "rollcall"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fill in a Word template once for every student in a spreadsheet."
 readme = "README.md"
 authors = [
